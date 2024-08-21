@@ -82,30 +82,30 @@ $HOME/.dbus/sessions/session-dbus
 $HOME/.gvfsd/.profile/gvfsd-helper"
 
 # Определение операционной системы
-def_OS(){
-    if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [ $ID_LIKE == "debian" ]; then
-        #OS="Debian GNU/Linux"
-        OS_LIKE=$ID_LIKE
-        OS_NAME=$NAME
-    elif [[ $ID_LIKE == *"fedora"* ]]; then
-        OS_LIKE="fedora"
-        OS_NAME=$NAME
-    else
-        OS_LIKE=$ID
-        OS_NAME=$NAME
-    fi
 
-    elif [ -f /etc/lsb-release ]; then
-        . /etc/lsb-release
-        OS=$DISTRIB_ID
-    elif [ -f /etc/redhat-release ]; then
-        OS=$(cat /etc/redhat-release | awk '{print $1}')
-    else
-        OS=$(uname -s)
-    fi
-}
+if [ -f /etc/os-release ]; then
+. /etc/os-release
+if [[ $ID_LIKE == "debian" ]]; then
+    #OS="Debian GNU/Linux"
+    OS_LIKE=$ID_LIKE
+    OS_NAME=$NAME
+elif [[ $ID_LIKE == "fedora" ]]; then
+    OS_LIKE="fedora"
+    OS_NAME=$NAME
+else
+    OS_LIKE=$ID
+    OS_NAME=$NAME
+fi
+
+elif [ -f /etc/lsb-release ]; then
+    . /etc/lsb-release
+    OS=$DISTRIB_ID
+elif [ -f /etc/redhat-release ]; then
+    OS=$(cat /etc/redhat-release | awk '{print $1}')
+else
+    OS=$(uname -s)
+fi
+
 
 # ----------------------------------
 # ----------------------------------
@@ -1438,7 +1438,7 @@ xdg-open . 2>/dev/null
 }
  
 user_list_for_fedora(){
-        echo -e "${magenta}[Пользовательские файлы]${clear}"
+    echo -e "${magenta}[Пользовательские файлы]${clear}"
     echo -n > users_file
     {
         echo "[Пользователи с /home/:]"  
@@ -3001,8 +3001,422 @@ env_profile_inf_for_arch() {
         echo -e "\n" 
     } >> env_profile_info
 }
+
+interest_fil_for_arch() {
+    echo -e "${cyan}[Rootkits, IOCs]${clear}"
+    {
+        # Проверимся на руткиты
+        echo "[Проверка на rootkits командой chkrootkit]" 
+        chkrootkit 2>/dev/null 
+        echo -e "\n" 
+    } >> interest_file
+
+    echo -e "${yellow}[IOC-и файлов]${clear}"
+    echo "[IOC-paths?]" >> interest_file
+    echo -e "\n" >> interest_file
+
+    counter=0;
+    for f in $iocfiles
+        do
+            if [ -e $f ] ; then 
+                counter=$((counter+1))
+                echo -e "${red}IOC-path found: ${clear}" $f
+                echo "IOC-path found: " $f >> interest_file
+                echo -e "\n" >> interest_file
+            fi
+        done
+
+    if [ $counter -gt 0 ] ; then 
+        echo -e "${red}IOC Markers found!!${clear}" 
+        echo "IOC Markers found!!" >> interest_file
+        echo -e "\n" >> interest_file
+    fi
+
+    {
+        echo "[BIOS TIME]" 
+        hwclock -r 2>/dev/null 
+        echo -e "\n" 
+        echo "[SYSTEM TIME]" 
+        date 
+        echo -e "\n" 
+
+        # privilege information
+        echo "[PRIVILEGE passwd - all users]" 
+        cat /etc/passwd 2>/dev/null 
+        echo -e "\n" 
+
+        # ssh keys
+        echo "[Additional info cat ssh (root) keys and hosts]" 
+        cat /root/.ssh/authorized_keys 2>/dev/null 
+        cat /root/.ssh/known_hosts 2>/dev/null 
+        echo -e "\n" 
+
+        #for users:
+        echo "[Additional info cat ssh (users) keys and hosts]" 
+        for name in $(ls /home)
+            do
+                echo SSH-files for: $name 
+                cat /home/$name/.ssh/authorized_keys 2>/dev/null 
+                echo -e "\n" 
+                cat /home/$name/.ssh/known_hosts 2>/dev/null 
+            done
+        echo -e "\n" 
+
+        # VM - detection
+        echo "[Virtual Machine Detection]" 
+        dmidecode -s system-manufacturer 2>/dev/null 
+        echo -e "\n" 
+        dmidecode  2>/dev/null 
+        echo -e "\n" 
+
+        # HTTP server inforamtion collection
+        # Nginx collection
+        echo "[Nginx Info]" 
+        echo -e "\n" 
+        # tar default directory
+        if [ -e "/usr/local/nginx" ] ; then
+            tar -zc -f ./artifacts/HTTP_SERVER_DIR_nginx.tar.gz /usr/local/nginx 2>/dev/null
+            echo "Grab NGINX files!" 
+            echo -e "\n" 
+        fi
+
+        # Apache2 collection
+        echo "[Apache Info]" 
+        echo -e "\n" 
+        # tar default directory
+        if [ -e "/etc/apache2" ] ; then
+            tar -zc -f ./artifacts/HTTP_SERVER_DIR_apache.tar.gz /etc/apache2 2>/dev/null
+            echo "Grab APACHE files!" 
+            echo -e "\n" 
+        fi
+
+        # Install files
+        echo "[Core modules - lsmod]" 
+        lsmod 
+        echo -e "\n" 
+
+        echo "[Пустые пароли]" 
+        cat /etc/shadow | awk -F: '($2==""){print $1}' 
+        echo -e "\n" 
+
+        # .bin
+        echo "[Malware collection]" 
+
+        find / -name \*.bin 
+        echo -e "\n" 
+
+        find / -name \*.exe 
+        echo -e "\n" 
+
+        find /home -name \*.sh 2>/dev/null
+        echo -e "\n" 
+
+        find /home -name \*.py 2>/dev/null
+        echo -e "\n" 
+
+        #find copied
+        # Find nouser or nogroup  data
+        echo "[NOUSER files]" 
+        find /root /home -nouser 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[NOGROUP files]" 
+        find /root /home -nogroup 2>/dev/null 
+        echo -e "\n" 
+
+    } >> interest_file
+
+    {
+        # Поиск всех процессов, у которых в командной строке встречается строка "nc" или "netcat"
+        echo "[Поиск Reverse Shell]" 
+        ps aux | grep -E '(nc|netcat|ncat|socat)'
+        echo -e "\n"
+
+        #попытка шелла на java
+        echo "[Поиск java shell]"
+        grep -rPl 'Runtime\.getRuntime\(\)\.exec\(|ProcessBuilder\(\)|FileOutputStream\(|FileWriter\(|URLClassLoader\(|ClassLoader\.defineClass\(|ScriptEngine\(.+\.eval\(|setSecurityManager\(null\)' /home/*/ /usr/bin /opt/application 2>/dev/null 2>/dev/null
+        echo -e "\n"
+
+        #поиск шелла на php
+        echo "[Поиск php shell]"
+        grep -rPl '(?:eval\(|assert\(|base64_decode|gzinflate|\$_(GET|POST|REQUEST|COOKIE|SESSION)|passthru|shell_exec|system|[^]+`|preg_replace\s*\(.*\/e[^,]*,)' /bin /etc /home /usr  /var /dev /tmp /srv /boot /opt 2>/dev/null
+        echo -e "\n"
+    } >> shell_file
+
+    {
+        echo "[lsof -n]" 
+        lsof -n 2>/dev/null
+        echo -e "\n" 
+
+        echo "[Verbose open files: lsof -V ]"  #open ports
+        lsof -V  
+        echo -e "\n" 
+    } >> lsof_file
+
+    {
+        if [ -e /var/log/btmp ]
+            then 
+            echo "[Last LOGIN fails: lastb]" 
+            lastb 2>/dev/null 
+            echo -e "\n" 
+        fi
+
+        if [ -e /var/log/wtmp ]
+            then 
+            echo "[Login logs and reboot: last -f /var/log/wtmp]" 
+            last -f /var/log/wtmp 
+            echo -e "\n" 
+        fi
+
+        # Удалено, так как inetd.conf не используется в Arch Linux
+        #if [ -e /etc/inetd.conf ]
+        #then
+        #	echo "[inetd.conf]" 
+        #	cat /etc/inetd.conf 
+        #	echo -e "\n" 
+        #fi
+
+        echo "[File system info: df -k in blocks]" 
+        df -k 
+        echo -e "\n" 
+
+        echo "[File system info: df -Th in human format]" 
+        df -Th 
+        echo -e "\n" 
+
+        echo "[List of mounted filesystems: mount]" 
+        mount 
+        echo -e "\n" 
+
+        echo "[kernel messages: dmesg]" 
+        dmesg 2>/dev/null 
+        echo -e "\n" 
+
+        # Удалено, так как sources.list не используется в Arch Linux
+        #echo "[Repo info: cat /etc/apt/sources.list]"  
+        #cat /etc/apt/sources.list 
+        #echo -e "\n" 
+
+        echo "[Static file system info: cat /etc/fstab]"  
+        cat /etc/fstab 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Virtual memory state: vmstat]"  
+        vmstat 
+        echo -e "\n" 
+
+        echo "[HD devices check: dmesg | grep hd]"  
+        dmesg | grep -i hd 2>/dev/null 
+        echo -e "\n" 
+
+        # Удалено, так как messages не используется в Arch Linux
+        #echo "[Get log messages: cat /var/log/messages]"  
+        #cat /var/log/messages 2>/dev/null 
+        #echo -e "\n" 
+
+        # Удалено, так как messages не используется в Arch Linux
+        #echo "[USB check 3 Try: cat /var/log/messages]"  
+        #cat /var/log/messages | grep -i usb 2>/dev/null 
+        #echo -e "\n" 
+
+        echo "[List all mounted files and drives: ls -lat /mnt]"  
+        ls -lat /mnt 
+        echo -e "\n" 
+
+        echo "[Disk usage: du -sh]"  
+        du -sh 
+        echo -e "\n" 
+
+        echo "[Disk partition info: fdisk -l]"  
+        fdisk -l 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Additional info - OS version cat /proc/version]" 
+        cat /proc/version 
+        echo -e "\n" 
+
+        echo "[Additional info lsb_release (distribution info)]" 
+        lsb_release 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Query journal: journalctl]"  
+        journalctl 
+        echo -e "\n" 
+
+        echo "[Memory free]"  
+        free 
+        echo -e "\n" 
+
+        echo "[Hardware: lshw]"  
+        lshw 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Hardware info: cat /proc/(cpuinfo|meminfo)]"  
+        cat /proc/cpuinfo 
+        echo -e "\n" 
+        cat /proc/meminfo 
+        echo -e "\n" 
+
+        echo "[/sbin/sysctl -a (core parameters list)]"  
+        /sbin/sysctl -a 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Profile parameters: cat /etc/profile.d/*]"  
+        cat /etc/profile.d/* 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Language locale]"  
+        locale  2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Get manually installed packages (pacman -Qe)]"  
+        pacman -Qe 2>/dev/null 
+        echo -e "\n"  
+
+        mkdir -p ./artifacts/config_root
+        #desktop icons and other_stuff
+        cp -r /root/.config ./artifacts/config_root 2>/dev/null 
+        #saved desktop sessions of users
+        cp -R /root/.cache/sessions ./artifacts/config_root 2>/dev/null 
+
+        echo "[VMware clipboard (root)!]" 
+        ls -laR /root/.cache/vmware/drag_and_drop/ 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[Mails of root]" 
+        cat /var/mail/root 2>/dev/null 
+        echo -e "\n" 
+
+        cp -R ~/.config/ 2>/dev/null 
+
+        echo "[Apps ls -la /usr/share/applications]"  
+        ls -la /usr/share/applications 
+        ls -la /home/*/.local/share/applications/ 
+        echo -e "\n" 
+
+        #recent 
+        echo "[Recently-Used]"  
+        more  /home/*/.local/share/recently-used.xbel 2>/dev/null | cat 
+        echo -e "\n"  
+
+        echo "[Var-LIBS directories - like program list]"  
+        ls -la /var/lib 2>/dev/null  
+        echo -e "\n" 
+
+        echo "[Some encypted data?]"  
+        cat /etc/crypttab 2>/dev/null  
+        echo -e "\n" 
+
+        echo "[User dirs default configs]"  
+        cat /etc/xdg/user-dirs.defaults  2>/dev/null  
+        echo -e "\n"       
+
+        echo "[OS-release:]"  
+        cat /etc/os-release 2>/dev/null  
+        echo -e "\n" 
+
+        echo "[List of boots]"  
+        journalctl --list-boots  2>/dev/null  
+        echo -e "\n" 
+
+        echo "[Machine-ID:]"  
+        cat /etc/machine-id 2>/dev/null 
+        echo -e "\n" 
+
+        echo "[SSL certs and keys:]"  
+        ls -laR /etc/ssl    2>/dev/null  
+        echo -e "\n" 
+
+        echo "[GnuPG contains:]"  
+        ls -laR /home/*/.gnupg/* 2>/dev/null  
+        echo -e "\n" 
+
+    } >> interest_file
+
+    echo "[Web collection]"
+    {
+        echo "[Web collection start...]" 
+        mkdir -p ./artifacts/mozilla
+        cp -r /home/*/.mozilla/firefox/ ./artifacts/mozilla 
+
+        echo "[Look through (SSH) service logs for errors]" 
+        journalctl _SYSTEMD_UNIT=sshd.service | grep “error” 2>/dev/null 
+        echo -e "\n" 
+    } >> interest_file
+
+    echo "Get users Recent and personalize collection" >> interest_file
+
+    for usa in $users
+    do
+        mkdir -p ./artifacts/share_user/$usa
+        cp -r /home/$usa/.local/share ./artifacts/share_user/$usa 2>/dev/null 
+    done
+
+    rm -r ./artifacts/share_user/$usa/Trash 2>/dev/null 
+    rm -r ./artifacts/share_user/$usa/share/Trash/files 2>/dev/null 
+
+    mkdir -p ./artifacts/share_root
+    cp -r /root/.local/share ./artifacts/share_root 2>/dev/null 
+    rm -r ./artifacts/share_root/Trash 2>/dev/null 
+    rm -r ./artifacts/share_root/share/Trash/files 2>/dev/null 
+    ls -la /home/*/.local/share/applications/ 
+
+    mkdir -p ./artifacts/config_user
+    cp -r /home/*/.config ./config_user
+    for usa in $users
+        do
+            mkdir -p ./artifacts/config_user/$usa
+            #desktop icons and other_stuff
+            cp -r /home/$usa/.config ./artifacts/config_user/$usa 2>/dev/null 
+
+            #saved desktop sessions of users
+            cp -R /home/$usa/.cache/sessions ./artifacts/config_user/$usa 2>/dev/null 
+
+        {
+            #check mail:
+            echo "[Mails of $usa:]" 
+            cat /var/mail/$usa 2>/dev/null 
+            echo -e "\n" 
+
+            echo "[VMware clipboard]" 
+            ls -laR /home/$usa/.cache/vmware/drag_and_drop/ 2>/dev/null 
+            echo -e "\n" 
+        } >> interest_file
+    done
+}
+
+mitre_ioc_for_arch() {
+#detect log4j
+    {
+        Initial_Access()
+        {
+            echo "[Detect log4j IOC]"
+            printf "| %-40s |\n" "`date`"
+        }
+
+        Initial_Access
+        sleep 2
+        echo "[Initial_Access]"
+        echo "[Поиск попыток эксплуатации в файлах по пути /var/log]"
+        sudo egrep -I -i -r '\$(\{|%7B)jndi:(ldap[s]?|rmi|dns|nis|iiop|corba|nds|http):/[^\n]+' /var/log
+        echo -e "\n" 
+
+        sudo find /var/log -name \*.gz -print0 | xargs -0 zgrep -E -i '\$(\{|%7B)jndi:(ldap[s]?|rmi|dns|nis|iiop|corba|nds|http):/[^\n]+'
+        echo -e "\n" 
+
+        echo "[Поиск обфусцированных вариантов]"
+        sudo find /var/log/ -type f -exec sh -c "cat {} | sudo sed -e 's/\${lower://'g | tr -d '}' | sudo egrep -I -i 'jndi:(ldap[s]?|rmi|dns|nis|iiop|corba|nds|http):'" \;
+        echo -e "\n" 
+        sudo find /var/log/ -name '*.gz' -type f -exec sh -c "zcat {} | sudo sed -e 's/\${lower://'g | tr -d '}' | sudo egrep -i 'jndi:(ldap[s]?|rmi|dns|nis|iiop|corba|nds|http):'" \;
+        echo -e "\n" 
+
+        # Удалено, так как Execution не определено
+        # Execution
+
+    } >> mitre_ioc_file
+}
+
 # Выполнение задач в зависимости от операционной системы
-def_OS
 case $OS_LIKE in
     "debian")
         echo "Это "$OS_NAME"."
@@ -3048,6 +3462,7 @@ case $OS_LIKE in
                 change_rights
             }|& tee >(sed "s,\x1B\[[0-9;]*[a-zA-Z],,g" >> ./console_log)
         }
+        fedora
          
         ;;
     "arch")
@@ -3064,10 +3479,13 @@ case $OS_LIKE in
                 services_inf_for_arch
                 devices_inf_for_arch
                 env_profile_inf_for_arch
-            }
-
-
+                interest_fil_for_arch
+                mitre_ioc_for_arch
+                archive
+                change_files
+            }|& tee >(sed "s,\x1B\[[0-9;]*[a-zA-Z],,g" >> ./console_log)
         }
+        arch
         
         ;;
     "Oracle Linux")
